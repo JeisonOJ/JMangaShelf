@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>JMangaShelf</title>
+    {% if config.INSTANCE_TOKEN %}<meta name="jmangashelf-instance" content="{{ config.INSTANCE_TOKEN }}">{% endif %}
+    <meta name="theme-color" content="#222033">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/marca-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/marca-180.png">
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='organization.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='covers.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='mal-import.js') }}" defer></script>
+</head>
+<body>
+    <aside class="sidebar">
+        <a class="brand" href="/" aria-label="JMangaShelf, inicio">
+            <img src="/static/icons/marca-192.png" width="42" height="42" alt="">
+            <span>JMangaShelf<small>Biblioteca personal</small></span>
+        </a>
+        <nav aria-label="Secciones de la biblioteca">
+            <h2>Biblioteca</h2>
+            <div id="sections" class="sections"></div>
+        </nav>
+        <div class="sidebar-filters">
+            <h2>Filtros</h2>
+            <label>Organización<select id="class-filter"><option value="">Todas las obras</option><option value="yes">Clasificadas</option><option value="no">Sin clasificar</option></select></label>
+            <label>Fuentes<select id="multi-filter"><option value="">Todas las fuentes</option><option value="multi">Varias fuentes de lectura</option></select></label>
+            <label>Tipo de obra<select id="type-filter"></select></label>
+            <label>Etiqueta<select id="tag-filter"></select></label>
+            <label>Carpeta del navegador<select id="folder-filter"></select></label>
+            <label>Estado del enlace<select id="health-filter"><option value="">Todos los enlaces</option><option value="broken">Con enlaces rotos</option><option value="suspicious">Con enlaces sospechosos</option></select></label>
+        </div>
+        <div class="sidebar-footer">
+            <button id="backup-button" class="sidebar-action"><span aria-hidden="true">⇄</span> Copias de seguridad</button>
+            {% if config.PORTABLE or config.DEV_SHUTDOWN %}<button id="shutdown" class="sidebar-action" type="button"{% if config.DEV_SHUTDOWN %} data-endpoint="{{ url_for('shutdown') }}"{% endif %}>Cerrar JMangaShelf</button>{% endif %}
+            <p><span class="local-dot"></span> Biblioteca local <span>v{{ version }}</span></p>
+        </div>
+    </aside>
+
+    <main>
+        <header class="topbar">
+            <span>Mi espacio <span class="crumb-separator">/</span> <strong>Biblioteca</strong></span>
+            <div class="org-actions"><button id="capture" class="button primary">Guardar enlace</button>
+            <button id="top-import" class="button secondary">Importar marcadores</button>
+            <button id="mal-import" class="button secondary">Importar MyAnimeList</button></div>
+        </header>
+        <div class="workspace">
+            <header class="page-heading">
+                <div><h1 id="page-title">Mi biblioteca</h1><p id="library-count" aria-live="polite">Cargando obras…</p></div>
+                <button id="new-work" class="button primary"><span aria-hidden="true">＋</span> Nueva obra</button>
+            </header>
+            <div class="toolbar">
+                <label class="search"><span class="magnifier" aria-hidden="true"></span>
+                    <input id="search" type="search" placeholder="Buscar por título o alias…" aria-label="Buscar por título o alias">
+                </label>
+                <div class="view-controls">
+                    <label class="sort"><span class="visually-hidden">Orden</span>
+                        <select id="sort" aria-label="Orden">
+                            <option value="updated_at">Actualizadas primero</option>
+                            <option value="created_at">Añadidas primero</option>
+                            <option value="title">Título (A–Z)</option>
+                            <option value="rating">Mayor puntuación</option>
+                        </select>
+                    </label>
+                    <div class="view-switch" role="group" aria-label="Vista de biblioteca">
+                        <button id="grid-view" aria-label="Cuadrícula" title="Cuadrícula" aria-pressed="true"><span class="grid-icon"></span></button>
+                        <button id="list-view" aria-label="Lista" title="Lista" aria-pressed="false"><span class="list-icon"></span></button>
+                    </div>
+                </div>
+            </div>
+            <div class="org-actions organization-bar">
+                <button id="select-mode" class="button secondary" aria-pressed="false">Seleccionar obras</button>
+                <button id="review" class="button secondary">Revisar duplicados</button>
+                <button id="suggestions" class="button secondary">Revisar títulos</button>
+                <button id="cover-batch" class="button secondary">Buscar portadas en lote</button>
+            </div>
+            <div id="batch-bar" class="org-actions organization-bar" hidden>
+                <strong id="selected-count"></strong><button id="select-results" class="button secondary">Seleccionar resultados</button>
+                <button id="clear-selection" class="button secondary">Desmarcar</button>
+                <button id="batch" class="button secondary">Organizar selección</button>
+                <button id="merge" class="button secondary">Comparar y fusionar</button>
+                <button id="delete-selected" class="button danger subtle" disabled>Eliminar seleccionadas</button>
+            </div>
+            <p id="feedback" class="feedback" role="status" hidden></p>
+            <section id="library" class="library" aria-label="Obras guardadas" aria-busy="true"></section>
+            <div id="load-more" class="load-more" hidden><button class="button secondary" id="more-works" type="button" aria-controls="library">Cargar más obras</button></div>
+            <section id="empty" class="empty" hidden>
+                <div class="empty-illustration" aria-hidden="true">
+                    <span class="book book-first"></span><span class="book book-middle"></span><span class="book book-last"></span>
+                </div>
+                <h2 id="empty-title">Tu biblioteca está lista para empezar</h2>
+                <p id="empty-copy">Importa tus marcadores del navegador o añade una obra para empezar a organizar tus lecturas.</p>
+                <button id="empty-action" class="button secondary">Importar marcadores</button>
+            </section>
+        </div>
+    </main>
+
+    <dialog id="work-dialog">
+        <form id="work-form" class="dialog-layout">
+            <header class="dialog-header"><h2 id="work-heading">Nueva obra</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body">
+                <label>Organización<select name="classified"><option value="yes">Clasificada</option><option value="no">Sin clasificar</option></select></label>
+                <label>Título <input name="title" maxlength="300" required></label>
+                <label>Títulos alternativos <textarea name="aliases" rows="3" placeholder="Un título por línea"></textarea></label>
+                <div class="form-row">
+                    <label>Tipo <select name="type"></select></label>
+                    <label>Estado <select name="status"></select></label>
+                    <label>Capítulo actual <input name="chapter" maxlength="80" placeholder="Ej. 24.5"></label>
+                </div>
+                <label>Puntuación personal <select name="rating" id="work-rating"></select></label>
+                <p id="work-mal-ids" class="muted" hidden></p>
+                <fieldset>
+                    <legend>Etiquetas</legend>
+                    <div class="work-tags" id="edit-tags"></div>
+                    <div class="tag-entry"><input name="tag" maxlength="60" placeholder="Ej. fantasía" aria-label="Nueva etiqueta"><button class="button secondary" id="add-tag" type="button">Añadir etiqueta</button></div>
+                </fieldset>
+                <label>Notas <textarea name="notes" maxlength="20000" rows="4"></textarea></label>
+                <fieldset id="work-folders" hidden><legend>Carpetas originales del navegador</legend><ul></ul></fieldset>
+                <fieldset>
+                    <legend>Enlaces de lectura</legend>
+                    <div id="link-fields"></div>
+                    <button class="button secondary" type="button" id="add-link">Añadir enlace</button>
+                </fieldset>
+                <fieldset>
+                    <legend>Portada</legend>
+                    <div class="org-actions"><button id="cover-search" class="button secondary" type="button">Buscar portada</button></div>
+                    <div id="staged-cover" class="staged-cover" hidden></div>
+                    <div id="alternate-covers"></div>
+                    <label>Origen
+                        <select name="cover_kind">
+                            <option value="none">Sin portada</option>
+                            <option value="keep">Conservar portada actual</option>
+                            <option value="anilist" disabled hidden>Portada seleccionada de AniList</option>
+                            <option value="local">Archivo local</option>
+                            <option value="url">URL de imagen</option>
+                        </select>
+                    </label>
+                    <label id="cover-file-label" hidden>Archivo de imagen <input name="cover_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><small>JPG, PNG, WebP o GIF. Hasta 5 MB.</small></label>
+                    <label id="cover-url-label" hidden>URL de imagen <input name="cover_url" type="url" maxlength="4096" placeholder="https://…"><small>La portada remota se carga cuando pulsas «Mostrar portada».</small></label>
+                </fieldset>
+                <p class="form-error" role="alert" hidden></p>
+            </div>
+            <footer class="dialog-footer">
+                <button class="button danger subtle" id="delete-work" type="button" hidden>Eliminar obra</button>
+                <div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" type="submit">Guardar obra</button></div>
+            </footer>
+        </form>
+    </dialog>
+
+    <dialog id="sources-dialog" class="small-dialog" aria-labelledby="sources-heading">
+        <div class="dialog-layout">
+            <header class="dialog-header"><h2 id="sources-heading">Fuentes y referencias</h2><button class="close" id="close-sources" type="button" aria-label="Cerrar">×</button></header>
+            <div id="sources-body" class="dialog-body extra-links"></div>
+        </div>
+    </dialog>
+
+    <dialog id="mal-dialog" class="wide-dialog">
+        <form id="mal-form" class="dialog-layout">
+            <header class="dialog-header"><h2>Importar MyAnimeList</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body">
+                <label>Exportación de manga <input name="file" type="file" accept=".xml,.gz,application/xml,application/gzip" required><small>Archivo XML o XML.GZ de MyAnimeList.</small></label>
+                <div><button type="button" class="button secondary" id="mal-preview">Ver vista previa</button></div>
+                <p id="mal-summary" aria-live="polite"></p>
+                <div id="mal-navigation" hidden>
+                    <label>Mostrar <select id="mal-filter"></select></label>
+                    <label>Buscar títulos <input id="mal-search" type="search" placeholder="Título de MAL o de la ficha local"></label>
+                    <small id="mal-visible" role="status"></small>
+                </div>
+                <div id="mal-rows"></div>
+                <label id="mal-consent" hidden><input type="checkbox" name="confirm" disabled> Confirmo las acciones y los valores seleccionados.</label>
+                <p class="form-error" role="alert" hidden></p>
+            </div>
+            <footer class="dialog-footer"><div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button id="mal-apply" class="button primary" type="submit" disabled>Aplicar importación</button></div></footer>
+        </form>
+    </dialog>
+
+    <dialog id="cover-dialog" class="wide-dialog" aria-labelledby="cover-heading">
+        <div class="dialog-layout">
+            <header class="dialog-header">
+                <h2 id="cover-heading">Buscar portada en AniList</h2>
+                <button class="close" id="close-cover" type="button" aria-label="Cerrar">×</button>
+            </header>
+            <div class="dialog-body" id="cover-body"></div>
+        </div>
+    </dialog>
+
+    <dialog id="chapter-dialog" class="small-dialog">
+        <form id="chapter-form" class="dialog-layout">
+            <header class="dialog-header"><h2>Actualizar capítulo</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body">
+                <p id="chapter-title"></p>
+                <label>Capítulo actual <input name="chapter" maxlength="80" placeholder="Ej. 24.5 o Epílogo"></label>
+                <p class="form-error" role="alert" hidden></p>
+            </div>
+            <footer class="dialog-footer">
+                <div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" type="submit">Guardar capítulo</button></div>
+            </footer>
+        </form>
+    </dialog>
+
+    <dialog id="import-dialog" class="wide-dialog">
+        <form id="import-form" class="dialog-layout">
+            <header class="dialog-header"><h2>Importar marcadores del navegador</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body">
+                <p>Selecciona el archivo HTML exportado desde Edge, Chrome o Firefox. Podrás elegir las carpetas y los enlaces antes de guardar.</p>
+                <div class="import-file"><label>Archivo de marcadores <input name="file" type="file" accept=".html,.htm,text/html"></label>
+                    <button class="button secondary" type="button" id="preview-import">Ver vista previa</button></div>
+                <div id="import-preview" hidden>
+                    <div class="form-row import-defaults">
+                        <label>Tipo para obras nuevas <select name="type"></select></label>
+                        <label>Estado para obras nuevas <select name="status"></select></label>
+                    </div>
+                    <p class="preview-summary" id="preview-count" aria-live="polite"></p>
+                    <p id="preview-help" class="muted"></p>
+                    <div class="import-controls">
+                        <button class="button secondary" id="select-all" type="button">Marcar todos</button>
+                        <button class="button secondary" id="select-none" type="button">Desmarcar todos</button>
+                    </div>
+                    <div id="bookmark-tree" class="bookmark-tree" aria-label="Marcadores por carpeta"></div>
+                </div>
+                <p class="form-error" role="alert" hidden></p>
+            </div>
+            <footer class="dialog-footer">
+                <div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button>
+                    <button id="commit-import" class="button primary" type="submit" disabled>Importar selección</button></div>
+            </footer>
+        </form>
+    </dialog>
+
+    <dialog id="backup-dialog">
+        <form id="backup-form" class="dialog-layout">
+            <header class="dialog-header"><h2>Copias de seguridad</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body">
+                <fieldset>
+                    <legend>Exportar biblioteca</legend>
+                    <p>Descarga un JSON con tus obras, puntuaciones, ID de MyAnimeList, enlaces y portadas locales.</p>
+                    <a class="button secondary" href="/api/backup" download>Descargar copia JSON</a>
+                </fieldset>
+                <fieldset>
+                    <legend>Restaurar biblioteca</legend>
+                    <label>Copia JSON <input name="file" type="file" accept=".json,application/json" required></label>
+                    <label>Modo de restauración
+                        <select name="mode"><option value="merge">Añadir obras nuevas</option><option value="replace">Reemplazar toda la biblioteca</option></select>
+                    </label>
+                    <p id="backup-mode-help" class="muted">Si coincide un ID de ficha, un ID de MyAnimeList o un enlace, se conserva la obra actual.</p>
+                    <label id="replace-confirm" hidden>Escribe REEMPLAZAR para confirmar <input name="confirm" autocomplete="off"></label>
+                </fieldset>
+                <p class="form-error" role="alert" hidden></p>
+            </div>
+            <footer class="dialog-footer">
+                <div class="footer-actions"><button class="button secondary" type="button" data-close>Cerrar</button><button class="button primary" type="submit">Restaurar copia</button></div>
+            </footer>
+        </form>
+    </dialog>
+
+    <dialog id="org-dialog" class="wide-dialog">
+        <form id="org-form" class="dialog-layout">
+            <header class="dialog-header"><h2 id="org-heading"></h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body"><div id="org-fields"></div><p class="form-error" role="alert" hidden></p></div>
+            <footer class="dialog-footer"><div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button id="org-submit" class="button primary" type="submit">Guardar</button></div></footer>
+        </form>
+    </dialog>
+    <dialog id="delete-dialog" class="small-dialog">
+        <form id="delete-form" class="dialog-layout">
+            <header class="dialog-header"><h2>Eliminar obra</h2><button class="close" type="button" data-close aria-label="Cerrar">×</button></header>
+            <div class="dialog-body"><p id="delete-message"></p><p class="form-error" role="alert" hidden></p></div>
+            <footer class="dialog-footer"><div class="footer-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button class="button danger" type="submit">Eliminar obra</button></div></footer>
+        </form>
+    </dialog>
+</body>
+</html>
